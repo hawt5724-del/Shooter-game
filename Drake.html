@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><script nonce="mlZY8dToF0rsDimRZ7aZyg" src="https://localhost:63304/resources/setup.js"></script><script nonce="Iv8uvTkPIH5BRwUqq0RNcQ" src="https://localhost:63304/resources/frontend.min.js" server="https://localhost:63304" id="__dld-frontend__" async defer></script>
+  <meta charset="UTF-8">
+  <title>2D WASD Shooter with Tons of Upgrades</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #181818; }
+    canvas { display: block; }
+    #info, #status, #round, #score {
+      position: absolute;
+      color: white;
+      font-family: Arial, sans-serif;
+      z-index: 2;
+      background: rgba(0,0,0,0.4);
+      padding: 8px;
+      border-radius: 6px;
+    }
+    #info { top: 10px; left: 10px; }
+    #status { top: 10px; right: 10px; }
+    #round { top: 50px; left: 10px; color: #fffa9c; font-weight: bold; }
+    #score { top: 90px; left: 10px; color: #affd4c; font-weight: bold; }
+    #hpbar {
+      position: absolute;
+      top: 130px; left: 10px;
+      width: 160px; height: 18px;
+      background: #333;
+      border-radius: 8px;
+      z-index: 2;
+      overflow: hidden;
+      border: 2px solid #555;
+    }
+    #hpfill {
+      height: 100%; background: #0fc654;
+      border-radius: 8px;
+      transition: width 0.2s;
+    }
+    #upgradeMenu {
+      position: absolute;
+      left: 0; top: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.80);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+    }
+    #upgradeMenu h2 { color: #fff; font-size: 2em; margin-bottom: 24px; }
+    .upgrade-option {
+      background: #333;
+      color: #fff;
+      border: 2px solid #888;
+      border-radius: 10px;
+      font-size: 1.2em;
+      margin: 10px;
+      padding: 14px 24px;
+      cursor: pointer;
+      min-width: 220px;
+      transition: background 0.2s, border 0.2s;
+    }
+    .upgrade-option:hover {
+      background: #222;
+      border: 2px solid #fffa9c;
+      color: #fffa9c;
+    }
+    #upgradeDesc {
+      color: #fff;
+      font-size: 1.1em;
+      margin-top: 10px;
+      margin-bottom: 10px;
+      max-width: 400px;
+      text-align: center;
+    }
+    #upgradeStats {
+      color: #affd4c;
+      font-size: 1em;
+      margin-bottom: 10px;
+      max-width: 400px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">Move: WASD | Aim: Mouse | Shoot: Left Click | Teleport: T</div>
+  <div id="status">Status: Alive</div>
+  <div id="round">Round: 1</div>
+  <div id="score">Score: 0</div>
+  <div id="hpbar"><div id="hpfill" style="width:100%"></div></div>
+  <div id="upgradeMenu">
+    <h2>Choose an Upgrade!</h2>
+    <div id="upgradeStats"></div>
+    <div id="upgradeList"></div>
+    <div id="upgradeDesc"></div>
+  </div>
+  <canvas id="game"></canvas>
+  <script>
+    // --- Setup and variables ---
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+
+    function resizeCanvas() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    let player = {
+      x: width / 2,
+      y: height / 2,
+      radius: 18,
+      color: "#00f6fa",
+      speed: 5,
+      alive: true,
+      angle: 0,
+      maxhp: 100,
+      hp: 100,
+      shield: 0, // shield blocks
+      sword: 0,  // sword upgrade
+      extraLife: 0,
+      teleports: 0
+    };
+
+    // --- Upgrades ---
+    let upgrades = {
+      doubleBullets: 0,
+      explosiveBullets: 0,
+      speedUp: 0,
+      piercingBullets: 0,
+      biggerBullets: 0,
+      heal: 0,
+      rapidFire: 0,
+      ricochetBullets: 0,
+      shield: 0,
+      freezeBullets: 0,
+      splitShot: 0,
+      poisonBullets: 0,
+      multiShot: 0,
+      homingBullets: 0,
+      teleport: 0,
+      extraLife: 0,
+      sword: 0
+    };
+
+    // --- Upgrade Pool ---
+    const upgradePool = [
+      {
+        key: "doubleBullets",
+        name: "Double Bullets",
+        desc: "Shoot twice as many bullets per click. Stacks (doubles) if picked again."
+      },
+      {
+        key: "explosiveBullets",
+        name: "Explosive Bullets",
+        desc: "Bullets explode on hit, damaging nearby targets. Explosion radius doubles if picked again."
+      },
+      {
+        key: "speedUp",
+        name: "Speed Up",
+        desc: "Move twice as fast. Stacks if picked again."
+      },
+      {
+        key: "piercingBullets",
+        name: "Piercing Bullets",
+        desc: "Bullets pass through one more target per shot. Stacks if picked again."
+      },
+      {
+        key: "biggerBullets",
+        name: "Bigger Bullets",
+        desc: "Bullets get twice as large (hit enemies more easily, stackable)."
+      },
+      {
+        key: "heal",
+        name: "Heal",
+        desc: "Restore your HP to full."
+      },
+      {
+        key: "rapidFire",
+        name: "Rapid Fire",
+        desc: "Shoot bullets faster. Stacks if picked again."
+      },
+      {
+        key: "ricochetBullets",
+        name: "Ricochet Bullets",
+        desc: "Bullets bounce off screen edges once before disappearing. Stacks if picked again."
+      },
+      {
+        key: "shield",
+        name: "Shield",
+        desc: "Blocks one hit per round. Stacks for more blocks."
+      },
+      {
+        key: "freezeBullets",
+        name: "Freeze Bullets",
+        desc: "Bullets slow enemies they hit for a short time. Stacks for longer effect."
+      },
+      {
+        key: "splitShot",
+        name: "Split Shot",
+        desc: "Bullets split into two smaller bullets after a short distance. Stacks for more splits."
+      },
+      {
+        key: "poisonBullets",
+        name: "Poison Bullets",
+        desc: "Bullets apply damage over time to enemies they hit. Stacks for higher damage."
+      },
+      {
+        key: "multiShot",
+        name: "Multi-Shot",
+        desc: "Bullets fire in a wider spread. Stacks for even wider spread."
+      },
+      {
+        key: "homingBullets",
+        name: "Homing Bullets",
+        desc: "Bullets curve toward the nearest enemy. Stacks for stronger homing."
+      },
+      {
+        key: "teleport",
+        name: "Teleport",
+        desc: "Teleport instantly to your mouse position once per round. Stacks for more teleports."
+      },
+      {
+        key: "extraLife",
+        name: "Extra Life",
+        desc: "Revive on death. Stacks for more lives."
+      },
+      {
+        key: "sword",
+        name: "Sword",
+        desc: "Gain a sword that swings in front of you, damaging enemies in close range. Stacks for larger sword and more damage."
+      }
+    ];
+
+    // --- Utility ---
+    function shuffle(arr) {
+      for (let i = arr.length-1; i > 0; i--) {
+        let j = Math.floor(Math.random()*(i+1));
+        [arr[i],arr[j]]=[arr[j],arr[i]];
+      }
+      return arr;
+    }
+    function getBulletsPerShot() {
+      return Math.pow(2, upgrades.doubleBullets) || 1;
+    }
+    function getExplosionRadius() {
+      return upgrades.explosiveBullets ? 40 * Math.pow(2, upgrades.explosiveBullets - 1) : 0;
+    }
+    function getSpeed() {
+      return player.speed * Math.pow(2, upgrades.speedUp);
+    }
+    function getPierce() {
+      return upgrades.piercingBullets ? Math.pow(2, upgrades.piercingBullets) : 0;
+    }
+    function getBulletRadius() {
+      return 6 * Math.pow(2, upgrades.biggerBullets);
+    }
+    function getSpread() {
+      return Math.PI / 8 * Math.pow(1.3, upgrades.multiShot);
+    }
+    function getFireCooldown() {
+      return upgrades.rapidFire ? Math.max(80 / Math.pow(1.5, upgrades.rapidFire), 10) : 80;
+    }
+    function getSwordRange() {
+      return upgrades.sword ? 60 * Math.pow(1.25, upgrades.sword-1) : 0;
+    }
+    function getSwordDamage() {
+      return upgrades.sword ? 1 * Math.pow(2, upgrades.sword-1) : 0;
+    }
+    function getRicochetCount() {
+      return upgrades.ricochetBullets;
+    }
+    function getFreezeDuration() {
+      return upgrades.freezeBullets ? 60 * upgrades.freezeBullets : 0;
+    }
+    function getPoisonDamage() {
+      return upgrades.poisonBullets ? 0.05 * upgrades.poisonBullets : 0;
+    }
+    function getSplitCount() {
+      return upgrades.splitShot;
+    }
+    function getHomingStrength() {
+      return upgrades.homingBullets ? 0.035 * upgrades.homingBullets : 0;
+    }
+
+    // HP bar update
+    function updateHPBar() {
+      let percent = Math.max(0, Math.min(1, player.hp/player.maxhp));
+      document.getElementById('hpfill').style.width = (percent*100) + "%";
+    }
+
+    // --- Controls ---
+    let keys = {};
+    document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+    // Mouse aiming
+    let mouse = { x: width/2, y: height/2 };
+    canvas.addEventListener('mousemove', e => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+    });
+
+    // Teleport
+    document.addEventListener('keydown', e => {
+      if (!player.alive || upgradeMenuActive) return;
+      if (e.key.toLowerCase() === 't' && upgrades.teleport > 0 && player.teleports > 0) {
+        player.x = mouse.x;
+        player.y = mouse.y;
+        player.teleports--;
+      }
+    });
+
+    // --- Bullets ---
+    let bullets = [];
+    let lastShot = 0;
+    canvas.addEventListener('mousedown', e => {
+      if (!player.alive || e.button !== 0 || upgradeMenuActive) return;
+      if (performance.now() - lastShot < getFireCooldown()) return;
+      lastShot = performance.now();
+      let bulletsPerShot = getBulletsPerShot();
+      let baseAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+      let spread = getSpread();
+      let startAngle = baseAngle - (spread * (bulletsPerShot-1) / 2);
+      for (let k=0; k<bulletsPerShot; k++) {
+        let angle = startAngle + spread * k;
+        bullets.push({
+          x: player.x + Math.cos(angle) * player.radius,
+          y: player.y + Math.sin(angle) * player.radius,
+          radius: getBulletRadius(),
+          color: upgrades.explosiveBullets > 0 ? "#ffae00" : "#fff700",
+          dx: Math.cos(angle) * 12,
+          dy: Math.sin(angle) * 12,
+          explosive: upgrades.explosiveBullets > 0,
+          pierceLeft: getPierce(),
+          ricochet: getRicochetCount(),
+          freeze: upgrades.freezeBullets > 0,
+          split: getSplitCount(),
+          poison: upgrades.poisonBullets > 0,
+          homing: getHomingStrength()
+        });
+      }
+    });
+
+    // --- Rounds and targets ---
+    let round = 1;
+    let targets = [];
+    let score = 0;
+    function updateScore() {
+      document.getElementById('score').textContent = "Score: " + score;
+    }
+    // Poison/slow states
+    function spawnRoundTargets(num) {
+      targets = [];
+      for (let i = 0; i < num; i++) {
+        spawnTarget();
+      }
+      document.getElementById('round').textContent = "Round: " + round;
+    }
+    function spawnTarget() {
+      let edge = Math.floor(Math.random()*4);
+      let tx, ty;
+      if (edge === 0) {
+        tx = Math.random() * width;
+        ty = 40;
+      } else if (edge === 1) {
+        tx = Math.random() * width;
+        ty = height - 40;
+      } else if (edge === 2) {
+        tx = 40;
+        ty = Math.random() * height;
+      } else {
+        tx = width - 40;
+        ty = Math.random() * height;
+      }
+      targets.push({
+        x: tx,
+        y: ty,
+        radius: 16,
+        color: "#ff2b2b",
+        speed: 2.5 + Math.random() * 1.5 + 0.4 * (round-1),
+        alive: true,
+        freeze: 0,
+        poison: 0,
+        hp: 2+round/2,
+        maxhp: 2+round/2
+      });
+    }
+    spawnRoundTargets(5);
+
+    // --- Upgrade Menu ---
+    const upgradeMenu = document.getElementById('upgradeMenu');
+    const upgradeDesc = document.getElementById('upgradeDesc');
+    const upgradeStats = document.getElementById('upgradeStats');
+    const upgradeList = document.getElementById('upgradeList');
+    let upgradeMenuActive = false;
+
+    function showUpgradeMenu() {
+      upgradeMenu.style.display = 'flex';
+      upgradeMenuActive = true;
+      upgradeDesc.textContent = "Pick one! Effects double if you choose the same upgrade again.";
+      upgradeStats.innerHTML =
+        `Bullets per shot: <b>${getBulletsPerShot()}</b><br>` +
+        `Explosion radius: <b>${getExplosionRadius()}</b><br>` +
+        `Speed: <b>${getSpeed()}</b><br>` +
+        `Piercing: <b>${getPierce()}</b><br>` +
+        `Bullet size: <b>${getBulletRadius()}</b><br>` +
+        `Rapid fire cooldown: <b>${getFireCooldown().toFixed(0)}ms</b><br>` +
+        `Ricochet: <b>${getRicochetCount()}</b><br>` +
+        `Shield blocks: <b>${player.shield}</b><br>` +
+        `Freeze duration: <b>${getFreezeDuration()} frames</b><br>` +
+        `Split count: <b>${getSplitCount()}</b><br>` +
+        `Poison damage: <b>${getPoisonDamage().toFixed(2)}/frame</b><br>` +
+        `Multi-shot spread: <b>${(getSpread()*180/Math.PI).toFixed(1)}°</b><br>` +
+        `Homing strength: <b>${getHomingStrength().toFixed(3)}</b><br>` +
+        `Extra lives: <b>${player.extraLife}</b><br>` +
+        `Teleports per round: <b>${player.teleports}</b><br>` +
+        `Sword range: <b>${getSwordRange()}</b><br>` +
+        `Sword damage: <b>${getSwordDamage()}</b>`;
+      let shuffled = shuffle([...upgradePool]);
+      upgradeList.innerHTML = '';
+      shuffled.slice(0,4).forEach(upg => {
+        let div = document.createElement('div');
+        div.className = 'upgrade-option';
+        div.dataset.upgrade = upg.key;
+        div.textContent = upg.name;
+        div.addEventListener('mouseenter', function() {
+          upgradeDesc.textContent = upg.desc;
+        });
+        div.addEventListener('mouseleave', function() {
+          upgradeDesc.textContent = "Pick one! Effects double if you choose the same upgrade again.";
+        });
+        div.addEventListener('click', function() {
+          if (!upgradeMenuActive) return;
+          if (upg.key === 'heal') {
+            player.hp = player.maxhp;
+          } else if (upg.key === 'shield') {
+            upgrades.shield++;
+            player.shield++;
+          } else if (upg.key === 'extraLife') {
+            upgrades.extraLife++;
+            player.extraLife++;
+          } else if (upg.key === 'teleport') {
+            upgrades.teleport++;
+            player.teleports++;
+          } else if (upg.key === 'sword') {
+            upgrades.sword++;
+            player.sword++;
+          } else {
+            upgrades[upg.key]++;
+          }
+          hideUpgradeMenu();
+          spawnRoundTargets(5 + round - 1);
+        });
+        upgradeList.appendChild(div);
+      });
+    }
+    function hideUpgradeMenu() {
+      upgradeMenu.style.display = 'none';
+      upgradeMenuActive = false;
+    }
+
+    // --- Game Loop ---
+    let nextRoundTimeout = null;
+    function gameLoop() {
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw player
+      if (player.alive) {
+        player.angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+        // Move
+        let speed = getSpeed();
+        if (keys['w']) player.y -= speed;
+        if (keys['s']) player.y += speed;
+        if (keys['a']) player.x -= speed;
+        if (keys['d']) player.x += speed;
+        // Clamp to screen
+        player.x = Math.max(player.radius, Math.min(width-player.radius, player.x));
+        player.y = Math.max(player.radius, Math.min(height-player.radius, player.y));
+        // Draw body
+        ctx.save();
+        ctx.translate(player.x, player.y);
+        ctx.rotate(player.angle);
+        ctx.beginPath();
+        ctx.arc(0, 0, player.radius, 0, Math.PI*2);
+        ctx.fillStyle = player.color;
+        ctx.shadowColor = "#00f6fa";
+        ctx.shadowBlur = 8;
+        ctx.fill();
+        // Draw gun
+        ctx.beginPath();
+        ctx.rect(player.radius-2, -5, 16, 10);
+        ctx.fillStyle = "#888";
+        ctx.shadowBlur = 0;
+        ctx.fill();
+        ctx.restore();
+        // Draw sword
+        if (player.sword > 0) {
+          ctx.save();
+          ctx.translate(player.x, player.y);
+          ctx.rotate(player.angle);
+          ctx.beginPath();
+          ctx.arc(player.radius+getSwordRange()/2, 0, getSwordRange()/2, -Math.PI/5, Math.PI/5);
+          ctx.lineWidth = 16;
+          ctx.strokeStyle = "#fff";
+          ctx.shadowColor = "#affd4c";
+          ctx.shadowBlur = 8;
+          ctx.stroke();
+          ctx.restore();
+        }
+        // Draw crosshair
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(mouse.x, mouse.y, 10, 0, Math.PI*2);
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.shadowColor = "#fff";
+        ctx.shadowBlur = 4;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Bullets
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        let b = bullets[i];
+        // Homing
+        if (b.homing > 0 && targets.length > 0) {
+          let closest, minDist = 1e9;
+          for (let t of targets) {
+            if (!t.alive) continue;
+            let dx = t.x - b.x, dy = t.y - b.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < minDist) { minDist = dist; closest = t; }
+          }
+          if (closest && minDist > 8) {
+            let desiredAngle = Math.atan2(closest.y - b.y, closest.x - b.x);
+            let currentAngle = Math.atan2(b.dy, b.dx);
+            let newAngle = currentAngle + b.homing * Math.sign(desiredAngle - currentAngle);
+            b.dx = Math.cos(newAngle)*12;
+            b.dy = Math.sin(newAngle)*12;
+          }
+        }
+        b.x += b.dx;
+        b.y += b.dy;
+        // Ricochet
+        if (b.ricochet > 0) {
+          if (b.x < b.radius && b.dx < 0) { b.dx *= -1; b.ricochet--; }
+          if (b.x > width - b.radius && b.dx > 0) { b.dx *= -1; b.ricochet--; }
+          if (b.y < b.radius && b.dy < 0) { b.dy *= -1; b.ricochet--; }
+          if (b.y > height - b.radius && b.dy > 0) { b.dy *= -1; b.ricochet--; }
+        }
+        // Remove if out of bounds
+        if (b.x < -15 || b.x > width+15 || b.y < -15 || b.y > height+15) {
+          bullets.splice(i, 1);
+          continue;
+        }
+        // Split shot
+        if (b.split > 0 && Math.random() < 0.006) {
+          for (let s = 0; s < b.split; s++) {
+            let ang = Math.atan2(b.dy, b.dx) + (Math.random()-0.5)*0.4;
+            bullets.push({
+              x: b.x, y: b.y, radius: b.radius/2, color: b.color,
+              dx: Math.cos(ang)*10, dy: Math.sin(ang)*10,
+              explosive: b.explosive, pierceLeft: b.pierceLeft, ricochet: b.ricochet,
+              freeze: b.freeze, split: 0, poison: b.poison, homing: b.homing
+            });
+          }
+          b.split = 0;
+        }
+        // Draw
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
+        ctx.fillStyle = b.explosive ? "#ffae00" : b.color;
+        ctx.shadowColor = b.explosive ? "#ffae00" : "#fff700";
+        ctx.shadowBlur = b.explosive ? 18 : 8;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+
+      // Targets
+      let targetsAlive = 0;
+      for (let i = 0; i < targets.length; i++) {
+        let t = targets[i];
+        if (!t.alive) continue;
+        // Poison
+        if (t.poison > 0) {
+          t.hp -= t.poison;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, t.radius+10, 0, Math.PI*2);
+          ctx.strokeStyle = "#4fff6a";
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = 0.18;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
+        // Freeze
+        let speed = t.speed;
+        if (t.freeze > 0) speed *= 0.3;
+        // Move toward player
+        let dx = player.x - t.x, dy = player.y - t.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 1) {
+          t.x += (dx/dist) * speed;
+          t.y += (dy/dist) * speed;
+        }
+        // Draw
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, t.radius, 0, Math.PI*2);
+        ctx.fillStyle = t.freeze > 0 ? "#88f5ff" : t.color;
+        ctx.shadowColor = "#ff2b2b";
+        ctx.shadowBlur = 8;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // HP bar for target
+        ctx.beginPath();
+        ctx.rect(t.x-t.radius, t.y-t.radius-10, t.radius*2, 4);
+        ctx.fillStyle = "#222";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.rect(t.x-t.radius, t.y-t.radius-10, t.radius*2*(t.hp/t.maxhp), 4);
+        ctx.fillStyle = "#affd4c";
+        ctx.fill();
+
+        targetsAlive++;
+        // Sword collision
+        if (player.sword > 0 && player.alive) {
+          let swordRange = getSwordRange();
+          let sx = player.x + Math.cos(player.angle)*(player.radius+swordRange/2);
+          let sy = player.y + Math.sin(player.angle)*(player.radius+swordRange/2);
+          let swordDist = Math.sqrt((t.x-sx)**2 + (t.y-sy)**2);
+          if (swordDist < swordRange/2 + t.radius) {
+            t.hp -= getSwordDamage() * 0.5;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(sx, sy, swordRange/2, 0, Math.PI*2);
+            ctx.globalAlpha = 0.09;
+            ctx.fillStyle = "#affd4c";
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.restore();
+            if (t.hp <= 0) t.alive = false, score++;
+          }
+        }
+        // Collision with player
+        if (player.alive && dist < t.radius + player.radius - 2) {
+          if (player.shield > 0) {
+            player.shield--;
+            t.alive = false;
+          } else if (player.hp > 1) {
+            player.hp -= 34;
+            t.alive = false;
+          } else if (player.extraLife > 0) {
+            player.extraLife--;
+            player.hp = player.maxhp;
+            t.alive = false;
+          } else {
+            player.alive = false;
+            document.getElementById('status').textContent = "Status: Dead";
+            document.getElementById('info').textContent = "Game Over! Reload page to try again.";
+          }
+        }
+        // Collision with bullets
+        for (let j = 0; j < bullets.length; j++) {
+          let b = bullets[j];
+          let dx2 = t.x - b.x, dy2 = t.y - b.y;
+          let dist2 = Math.sqrt(dx2*dx2 + dy2*dy2);
+          if (dist2 < t.radius + b.radius - 2) {
+            // Explosive
+            if (b.explosive) {
+              let explosionRadius = getExplosionRadius();
+              for (let ti = 0; ti < targets.length; ti++) {
+                let tt = targets[ti];
+                if (!tt.alive) continue;
+                let edx = tt.x - b.x, edy = tt.y - b.y;
+                let edist = Math.sqrt(edx*edx + edy*edy);
+                if (edist < explosionRadius) {
+                  tt.hp -= 2;
+                  if (tt.hp <= 0) tt.alive = false, score++;
+                }
+              }
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(b.x, b.y, explosionRadius, 0, Math.PI*2);
+              ctx.fillStyle = "rgba(255, 235, 90, 0.18)";
+              ctx.shadowColor = "#fff700";
+              ctx.shadowBlur = 24;
+              ctx.fill();
+              ctx.restore();
+            } else {
+              t.hp -= 1;
+              if (t.hp <= 0) t.alive = false, score++;
+            }
+            // Freeze
+            if (b.freeze) t.freeze = getFreezeDuration();
+            // Poison
+            if (b.poison) t.poison = getPoisonDamage();
+            // Piercing
+            if (b.pierceLeft > 0) {
+              b.pierceLeft--;
+            } else {
+              bullets.splice(j, 1);
+            }
+            break;
+          }
+        }
+        if (t.freeze > 0) t.freeze--;
+      }
+      // Remove dead targets after collision checks
+      for (let i = targets.length - 1; i >= 0; i--) {
+        if (!targets[i].alive) targets.splice(i, 1);
+      }
+
+      // If no alive targets, start next round after a short delay
+      if (player.alive && targetsAlive === 0 && targets.length === 0 && !nextRoundTimeout && !upgradeMenuActive) {
+        round++;
+        player.teleports = upgrades.teleport;
+        nextRoundTimeout = setTimeout(() => {
+          showUpgradeMenu();
+          nextRoundTimeout = null;
+        }, 900);
+      }
+
+      updateScore();
+      updateHPBar();
+      requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+  </script>
+</body>
+</html>
